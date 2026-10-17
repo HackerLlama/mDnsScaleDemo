@@ -1,5 +1,6 @@
 *.pcap
 *.jsonl
 results/
+config/demo.env
 __pycache__/
 *.py[cod]

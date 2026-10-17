@@ -22,7 +22,7 @@ The laptop's Docker macvlan containers appear as separate LAN devices. Confirm t
 Copy `pi/generate_services.py` to the Pi, install Avahi if needed, and generate records. Choose the same service count as the laptop scenario:
 
 ```bash
-cd AvahiScaleDemo
+cd mDnsScaleDemo
 scp pi/generate_services.py pi@raspberrypi.local:~/generate_services.py
 ```
 
@@ -46,35 +46,28 @@ For example, to advertise a private test type instead, use `--service-type _scal
 
 ## Configure and run from Ubuntu
 
-Copy `config/demo.env.example` to `config/demo.env` as a reference, then use the corresponding values as command line arguments. The example addresses are placeholders: set the interface, subnet, gateway, Pi address, and IP pool for your LAN. The IP pool must be reserved and large enough for the selected client count.
+Copy `config/demo.env.example` to `config/demo.env` and edit it for your LAN. The example addresses are placeholders: set the interface, subnet, gateway, Pi address, and IP pool. The IP pool must be reserved and large enough for the selected client count. The runner reads this file directly; command-line flags are optional overrides.
 
 Builds the client image on the first run. No Docker Hub image is required.
 
 ```bash
-cd AvahiScaleDemo
-
-# One Avahi client discovers 10 Pi service instances.
-python3 scripts/run_demo.py services \
-  --scale 10 --parent enp3s0 --subnet 192.168.1.0/24 \
-  --gateway 192.168.1.1 --ip-range 192.168.1.240/28 --pi-ip 192.168.1.50
-
-# After changing the Pi to advertise one instance, 10 clients discover it.
-python3 scripts/run_demo.py clients \
-  --scale 10 --parent enp3s0 --subnet 192.168.1.0/24 \
-  --gateway 192.168.1.1 --ip-range 192.168.1.240/28 --pi-ip 192.168.1.50
+cd mDnsScaleDemo
+cp config/demo.env.example config/demo.env
+# Edit config/demo.env with the LAN settings and desired SCENARIO/SCALE.
+python3 scripts/run_demo.py
 ```
 
-Run the same commands with `--scale 100` and later `--scale 1000` as the test LAN and Pi are ready. For the clients scenario, the IP range must have at least that many free addresses. The services scenario needs only one client IP, but the Pi needs to handle the advertised record count.
+Set `SCENARIO=services` for one client discovering `SCALE` services, or `SCENARIO=clients` for `SCALE` clients discovering one service. Before each run, configure the Pi with the matching count using `generate_services.py`. Increase `SCALE` from 10 to 100 and later 1,000 as the test LAN and Pi are ready. For the clients scenario, the IP range must have at least that many free addresses. The services scenario needs only one client IP, but the Pi needs to handle the advertised record count.
+
+You can override individual settings without editing the file, for example `python3 scripts/run_demo.py clients --scale 100`, or choose another config with `--config path/to/demo.env`. `--capture` / `--no-capture` override the `CAPTURE` setting.
 
 The script prints each client's JSON result and writes a run summary under `results/`. Discovery time is measured in each container from the beginning of its browse until it has resolved the requested number of unique service instances. The clients scenario starts containers concurrently; each timer starts after that container's Avahi daemon is launched. Compare the distribution across runs, since host scheduling and container startup still add variation.
 
-To include UDP/5353 packet and frame-byte counts, install capture tools and add `--capture`:
+To include UDP/5353 packet and frame-byte counts, install capture tools and set `CAPTURE=true` in `config/demo.env` (or add `--capture`):
 
 ```bash
 sudo apt install tcpdump tshark
-python3 scripts/run_demo.py clients --scale 10 \
-  --parent enp3s0 --subnet 192.168.1.0/24 --gateway 192.168.1.1 \
-  --ip-range 192.168.1.240/28 --pi-ip 192.168.1.50 --capture
+python3 scripts/run_demo.py --capture
 python3 scripts/analyze_capture.py results/<run-name>.pcap
 ```
 
@@ -105,4 +98,4 @@ The two cases stress different work. A single browse for many service instances 
 - `client/`: minimal Avahi browser image and client config.
 - `pi/generate_services.py`: creates the Pi's static DNS-SD service records.
 - `scripts/analyze_capture.py`: summarizes packet and byte counts from an optional capture.
-- `config/demo.env.example`: example LAN settings.
+- `config/demo.env.example`: example LAN settings; copy it to the ignored local `config/demo.env` and edit it.
