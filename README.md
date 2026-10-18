@@ -61,7 +61,9 @@ Set `SCENARIO=services` for one client discovering `SCALE` services, or `SCENARI
 
 You can override individual settings without editing the file, for example `python3 scripts/run_demo.py clients --scale 100`, or choose another config with `--config path/to/demo.env`. `--capture` / `--no-capture` override the `CAPTURE` setting. If the local image is already built and Docker Hub is unavailable, use `python3 scripts/run_demo.py --skip-build`.
 
-The script prints each client's JSON result and writes a run summary under `results/`. Discovery time is measured in each container from the beginning of its browse until it has resolved the requested number of unique service instances. The clients scenario starts containers concurrently; each timer starts after that container's Avahi daemon is launched. Compare the distribution across runs, since host scheduling and container startup still add variation.
+The script prints each client's JSON result and writes a JSON summary plus a standalone HTML report under `results/`. Containers start concurrently, each starts its Avahi daemon, and each signals readiness through a shared start gate. Once all clients are ready, they begin browsing together. This keeps container and daemon startup skew out of the discovery interval.
+
+The report highlights **first-to-last discovery span** and plots a cumulative discovery curve. In `services` mode, each point is one unique Pi service instance resolved by the browser. In `clients` mode, each point is one client that resolved the service. The report also shows start-to-last time, success count, discovery event count, and median client completion time. JSON contains absolute discovery timestamps and per-event elapsed times for further analysis.
 
 To include UDP/5353 packet and frame-byte counts, install capture tools and set `CAPTURE=true` in `config/demo.env` (or add `--capture`):
 
@@ -94,7 +96,8 @@ The two cases stress different work. A single browse for many service instances 
 
 ## Files
 
-- `scripts/run_demo.py`: creates the temporary macvlan network, runs clients, collects JSON results, and cleans up containers/network.
+- `scripts/run_demo.py`: creates the temporary macvlan network, synchronizes client start, collects timestamped JSON results, and cleans up containers/network.
+- `scripts/render_report.py`: renders the cumulative discovery curve as a standalone HTML report.
 - `client/`: minimal Avahi browser image and client config.
 - `pi/generate_services.py`: creates the Pi's static DNS-SD service records.
 - `scripts/analyze_capture.py`: summarizes packet and byte counts from an optional capture.

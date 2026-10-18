@@ -163,6 +163,23 @@ def stop_capture(proc):
             proc.wait()
 
 
+def wait_for_ready(control_dir, names, timeout=180):
+    ready_dir = control_dir / "ready"
+    deadline = time.monotonic() + timeout
+    last_report = 0.0
+    while time.monotonic() < deadline:
+        ready_count = sum((ready_dir / name).exists() for name in names)
+        if ready_count == len(names):
+            start_at = time.time() + 1.0
+            (control_dir / "START_AT").write_text(f"{start_at:.9f}\n", encoding="ascii")
+            return start_at
+        if time.monotonic() - last_report >= 10:
+            print(f"Waiting for Avahi clients: {ready_count}/{len(names)} ready.", flush=True)
+            last_report = time.monotonic()
+        time.sleep(0.2)
+    raise RuntimeError(f"Only {ready_count}/{len(names)} Avahi clients became ready within {timeout} seconds")
+
+
 def wait_for_results(names, timeout):
     # Each worker exits on success or its own discovery deadline. Waiting in
     # parallel avoids a thousand serial Docker CLI polls at the target scale.
@@ -210,6 +227,8 @@ def main():
     args.results.mkdir(parents=True, exist_ok=True)
     run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
     network = "avahi-scale-" + uuid.uuid4().hex[:8]
+    control_dir = args.results.resolve() / f".{run_id}-control"
+    (control_dir / "ready").mkdir(parents=True, exist_ok=True)
     capture_path = args.results / f"{run_id}-{args.scenario}.pcap"
     names = []
     capture = None
@@ -243,6 +262,10 @@ def main():
                 "--env", f"SERVICE_TYPE={args.service_type}",
                 "--env", f"EXPECTED_SERVICES={expected}",
                 "--env", f"DISCOVERY_TIMEOUT={args.timeout}",
+                "--env", "CONTROL_DIR=/run/demo-control",
+                "--env", f"CONTROL_ID={name}",
+                "--env", "STARTUP_TIMEOUT=180",
+                "--mount", f"type=bind,source={control_dir},target=/run/demo-control",
                 IMAGE,
             ])
         # Start clients in parallel so a 1,000-client run does not time out
@@ -252,6 +275,9 @@ def main():
             for future in as_completed(futures):
                 future.result()
 
+        start_at = wait_for_ready(control_dir, names)
+        print(f"All clients ready; synchronized browse start at {start_at:.3f} Unix seconds.", flush=True)
+
         for name, result in wait_for_results(names, args.timeout):
             payloads.append(result)
             print(json.dumps(result, sort_keys=True), flush=True)
@@ -259,6 +285,39 @@ def main():
         stop_capture(capture)
         capture = None
         times = [p["discovery_time_s"] for p in payloads if p.get("ok") and "discovery_time_s" in p]
+        discovery_events = []
+        for payload in payloads:
+            for instance in payload.get("instances", []):
+                discovery_events.append({
+                    "container": payload.get("container"),
+                    "name": instance.get("name"),
+                    "address": instance.get("address"),
+                    "port": instance.get("port"),
+                    "discovered_at_unix_s": instance.get("discovered_at_unix_s"),
+                    "elapsed_s": instance.get("elapsed_s"),
+                })
+        discovery_events.sort(key=lambda item: item["discovered_at_unix_s"] or 0)
+        first_event = discovery_events[0] if discovery_events else None
+        last_event = discovery_events[-1] if discovery_events else None
+        first_to_last_s = (
+            last_event["discovered_at_unix_s"] - first_event["discovered_at_unix_s"]
+            if first_event and last_event else None
+        )
+        start_to_last_s = (
+            last_event["discovered_at_unix_s"] - start_at
+            if last_event else None
+        )
+        traffic = None
+        if args.capture:
+            analysis = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "analyze_capture.py"), str(capture_path)],
+                text=True,
+                capture_output=True,
+            )
+            if analysis.returncode == 0:
+                traffic = json.loads(analysis.stdout)
+            else:
+                print(f"Could not summarize packet capture: {analysis.stderr.strip()}", file=sys.stderr)
         summary = {
             "run_id": run_id,
             "scenario": args.scenario,
@@ -267,19 +326,31 @@ def main():
             "advertised_service_count": args.scale if args.scenario == "services" else 1,
             "service_type": args.service_type,
             "pi_ip": args.pi_ip,
+            "synchronized_start_unix_s": round(start_at, 6),
             "success_count": sum(bool(p.get("ok")) for p in payloads),
             "result_count": len(payloads),
+            "expected_discovery_events": args.scale,
+            "discovery_event_count": len(discovery_events),
+            "first_discovery_unix_s": first_event["discovered_at_unix_s"] if first_event else None,
+            "last_discovery_unix_s": last_event["discovered_at_unix_s"] if last_event else None,
+            "first_to_last_discovery_s": round(first_to_last_s, 6) if first_to_last_s is not None else None,
+            "start_to_last_discovery_s": round(start_to_last_s, 6) if start_to_last_s is not None else None,
+            "discovery_events": discovery_events,
             "discovery_time_s": {
                 "min": min(times) if times else None,
                 "median": statistics.median(times) if times else None,
                 "max": max(times) if times else None,
             },
             "capture_file": str(capture_path) if args.capture else None,
+            "traffic": traffic,
             "results": payloads,
         }
         result_file = args.results / f"{run_id}-{args.scenario}.json"
         result_file.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         print(f"Summary written to {result_file}")
+        report_file = args.results / f"{run_id}-{args.scenario}.html"
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "render_report.py"), str(result_file), str(report_file)], check=True)
+        print(f"Discovery curve written to {report_file}")
         if args.capture:
             print(f"Capture written to {capture_path}; run scripts/analyze_capture.py on it for packet and byte counts.")
         return 0 if summary["success_count"] == summary["result_count"] and summary["result_count"] > 0 else 2
@@ -289,6 +360,7 @@ def main():
             subprocess.run(["docker", "rm", "--force", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if network_created:
             subprocess.run(["docker", "network", "rm", network], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        shutil.rmtree(control_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
