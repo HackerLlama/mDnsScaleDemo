@@ -181,7 +181,13 @@ def wait_for_results(names, timeout):
                 if "discovered_services" in candidate:
                     payload = candidate
             if payload is None:
-                payload = {"ok": False, "container": name, "reason": "container did not emit a result before timeout"}
+                logs = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+                payload = {
+                    "ok": False,
+                    "container": name,
+                    "reason": "container exited without emitting a result",
+                    "container_logs": logs or "<no container stdout or stderr>",
+                }
             yield name, payload
         for future, name in futures.items():
             if not future.done():
