@@ -2,8 +2,8 @@ FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends avahi-daemon avahi-utils python3 \
-    && mkdir -p /run/avahi-daemon \
+    && apt-get install -y --no-install-recommends avahi-daemon avahi-utils dbus python3 \
+    && mkdir -p /run/avahi-daemon /run/dbus \
     && rm -rf /var/lib/apt/lists/*
 
 COPY client/avahi-daemon.conf /etc/avahi/avahi-daemon.conf
