@@ -62,6 +62,10 @@ def main():
             with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=output, delete=False) as tmp:
                 tmp.write(xml)
                 tmp_path = Path(tmp.name)
+            # Avahi drops root privileges before reading service definitions.
+            # NamedTemporaryFile defaults to mode 0600, which would make the
+            # generated files unreadable to the avahi user.
+            tmp_path.chmod(0o644)
             tmp_path.replace(target)
         else:
             print(f"--- {filename} ---")

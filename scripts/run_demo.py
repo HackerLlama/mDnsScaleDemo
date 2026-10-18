@@ -87,6 +87,7 @@ def parse_args():
     parser.add_argument("--service-type", default=settings.get("SERVICE_TYPE", "_http._tcp"), help="DNS-SD service type")
     parser.add_argument("--timeout", type=int, default=int(settings.get("TIMEOUT", "90")), help="maximum discovery wait per client in seconds")
     parser.add_argument("--capture", action=argparse.BooleanOptionalAction, default=env_bool(settings, "CAPTURE"), help="capture UDP/5353 traffic with tcpdump")
+    parser.add_argument("--skip-build", action="store_true", help="use the already-built local image without contacting Docker Hub")
     parser.add_argument("--results", type=Path, default=ROOT / settings.get("RESULTS_DIR", "results"), help="directory for JSON result files")
     args = parser.parse_args()
     if args.scenario not in ("services", "clients"):
@@ -130,6 +131,12 @@ def make_network(name, args, subnet, pool):
 
 def build_image():
     command(["docker", "build", "--tag", IMAGE, str(ROOT)])
+
+
+def require_local_image():
+    result = subprocess.run(["docker", "image", "inspect", IMAGE], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if result.returncode != 0:
+        raise SystemExit(f"Local image {IMAGE} is not available; rerun without --skip-build when Docker Hub is reachable.")
 
 
 def start_capture(path, interface):
@@ -209,7 +216,11 @@ def main():
     network_created = False
     payloads = []
     try:
-        build_image()
+        if args.skip_build:
+            require_local_image()
+            print(f"Using cached image {IMAGE}.", flush=True)
+        else:
+            build_image()
         make_network(network, args, subnet, pool)
         network_created = True
         if args.capture:

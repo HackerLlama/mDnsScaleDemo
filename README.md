@@ -59,7 +59,7 @@ python3 scripts/run_demo.py
 
 Set `SCENARIO=services` for one client discovering `SCALE` services, or `SCENARIO=clients` for `SCALE` clients discovering one service. Before each run, configure the Pi with the matching count using `generate_services.py`. Increase `SCALE` from 10 to 100 and later 1,000 as the test LAN and Pi are ready. For the clients scenario, the IP range must have at least that many free addresses. The services scenario needs only one client IP, but the Pi needs to handle the advertised record count.
 
-You can override individual settings without editing the file, for example `python3 scripts/run_demo.py clients --scale 100`, or choose another config with `--config path/to/demo.env`. `--capture` / `--no-capture` override the `CAPTURE` setting.
+You can override individual settings without editing the file, for example `python3 scripts/run_demo.py clients --scale 100`, or choose another config with `--config path/to/demo.env`. `--capture` / `--no-capture` override the `CAPTURE` setting. If the local image is already built and Docker Hub is unavailable, use `python3 scripts/run_demo.py --skip-build`.
 
 The script prints each client's JSON result and writes a run summary under `results/`. Discovery time is measured in each container from the beginning of its browse until it has resolved the requested number of unique service instances. The clients scenario starts containers concurrently; each timer starts after that container's Avahi daemon is launched. Compare the distribution across runs, since host scheduling and container startup still add variation.
 
