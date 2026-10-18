@@ -56,13 +56,13 @@ while time.monotonic() < deadline:
     ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 0.25))
     if not ready:
         if proc.poll() is not None:
-            last_error = proc.stderr.read().strip()
+            last_error = proc.stderr.read().decode("utf-8", errors="replace").strip()
             break
         continue
     line = proc.stdout.readline().decode("utf-8", errors="replace")
     if not line:
         if proc.poll() is not None:
-            last_error = proc.stderr.read().strip()
+            last_error = proc.stderr.read().decode("utf-8", errors="replace").strip()
             break
         continue
     fields = line.rstrip("\n").split(";")
